@@ -116,7 +116,7 @@ def sendBroadcasts():
     client_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     client_socket.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
 
-    ip_address = client_socket.getsockname()[0]
+    #ip_address = client_socket.getsockname()[0]
     global endFlag
     while not endFlag.is_set():
         client_socket.sendto(b'Hello, I am ' + str(selfIp).encode('utf-8') + b' and my number is ' + str(num).encode('utf-8'),("<broadcast>",8082))
@@ -140,9 +140,12 @@ def connectSocket(address):
 
     global endFlag
     while not endFlag.is_set():
-        
-        client_socket.send(b'Hello, I am ' + str(selfIp).encode('utf-8') + b' and my number is ' + str(num).encode('utf-8'))
-        time.sleep(5)
+        try:
+            client_socket.send(b'Hello, I am ' + str(selfIp).encode('utf-8') + b' and my number is ' + str(num).encode('utf-8'))
+            time.sleep(5)
+        except socket.error:
+            print("Connection terminated")
+            break
     
     client_socket.close()
 
@@ -183,7 +186,16 @@ udpThread.start()
 cont = True
 while(cont):
    lock.acquire_lock()
-   ipIn = input("Enter a IPv4 address, or type 'exit' to stop: ")
+   try:
+        ipIn = input("Enter a IPv4 address, or type 'exit' to stop: ")
+   except KeyboardInterrupt:
+       cont = False
+       endFlag.set()
+      
+      #raise KeyboardInterrupt
+       for thread in threadStorage:
+          thread.join()
+       sys.exit()
    lock.release_lock()
    print(ipIn)
    if (ipIn == 'exit'):
