@@ -39,8 +39,13 @@ R_Server.flushall()
 
 lock = threading.Lock()
 broadcast = False
+endFlag = threading.Event()
+threadStorage = []
 
-
+def murderSock(socket):
+    global endFlag
+    endFlag.wait()
+    socket.close()
 
 def validIP(address):
     try:
@@ -50,21 +55,32 @@ def validIP(address):
         return False
 
 def Treceiver(connection,address):
-   running = True
-   while running: 
+   global endFlag
+   while not endFlag.is_set(): 
       buf = connection.recv(64)
-      print('TCP RECVD: ' + str(address[0]) + ' ' + buf.decode().split()[-1]) 
+      #print("Flag:" + str(endFlag.is_set()))
+      if len(buf.decode().split()) > 0:
+        print('TCP RECVD: ' + str(address[0]) + ' ' + buf.decode().split()[-1]) 
 
 def listenUdp():
     serversocket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     serversocket.bind(('', 8082)) 
-    running = True
-    while running: 
-      data, address = serversocket.recvfrom(1024)
+
+    socketMurder = threading.Thread(target=murderSock,args=(serversocket,))
+    socketMurder.start()
+
+    global endFlag
+    while not endFlag.is_set(): 
+      try:
+        data, address = serversocket.recvfrom(1024)
+      except socket.error:
+          print("Murdered udp socket")
+          break
       print('UDP RECVD: ' + f"{address[0]}" + ' ' + data.decode().split()[-1]) 
       R_Server.rpush("connections", str(address[0]))
       thread = threading.Thread(target = connectSocket, args = (address[0],))
       thread.start()
+    #serversocket.close()
 
 
 def listenTcp():
@@ -72,13 +88,25 @@ def listenTcp():
     serversocket.bind(('0.0.0.0', 8082)) 
     serversocket.listen(10)
 
-    cont = True
-    while cont:
-        connection, address = serversocket.accept() 
-        R_Server.rpush("connections", str(address[0]))
-        recvThread = threading.Thread(target = Treceiver, args= (connection,address))
-        recvThread.start()
-    serversocket.close()
+    socketMurder = threading.Thread(target=murderSock,args=(serversocket,))
+    socketMurder.start()
+
+    global endFlag
+    try:
+        while not endFlag.is_set():
+            try:
+                connection, address = serversocket.accept() 
+            except socket.error:
+                print("Murdered tcp socket")
+                break
+            R_Server.rpush("connections", str(address[0]))
+            recvThread = threading.Thread(target = Treceiver, args= (connection,address))
+            recvThread.start()
+    except KeyboardInterrupt:
+        print("Stopped Listening tcp")
+    
+    finally:
+        serversocket.close()
 
 
 
@@ -89,8 +117,8 @@ def sendBroadcasts():
     client_socket.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
 
     ip_address = client_socket.getsockname()[0]
-    running = True
-    while running: 
+    global endFlag
+    while not endFlag.is_set():
         client_socket.sendto(b'Hello, I am ' + str(selfIp).encode('utf-8') + b' and my number is ' + str(num).encode('utf-8'),("<broadcast>",8082))
         time.sleep(5)
     client_socket.close()
@@ -110,10 +138,11 @@ def connectSocket(address):
     lock.release_lock()
     
 
-    running = True
-    while running: 
+    global endFlag
+    while not endFlag.is_set():
+        
         client_socket.send(b'Hello, I am ' + str(selfIp).encode('utf-8') + b' and my number is ' + str(num).encode('utf-8'))
-        time.sleep(1)
+        time.sleep(5)
     
     client_socket.close()
 
@@ -138,12 +167,15 @@ else:
 
 if broadcast:
     thread = threading.Thread(target = sendBroadcasts)
+    threadStorage.append(thread)
     thread.start()
     
 tcpThread = threading.Thread(target = listenTcp)
+threadStorage.append(tcpThread)
 tcpThread.start()
 
 udpThread = threading.Thread(target = listenUdp)
+threadStorage.append(udpThread)
 udpThread.start()
 
 
@@ -156,7 +188,13 @@ while(cont):
    print(ipIn)
    if (ipIn == 'exit'):
       cont = False
-      break
+      endFlag.set()
+      
+      #raise KeyboardInterrupt
+      for thread in threadStorage:
+          thread.join()
+      sys.exit()
+      
    elif(ipIn == 'conns'):
        print(R_Server.lrange("connections", 0, -1))
    else:
