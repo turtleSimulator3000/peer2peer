@@ -77,9 +77,10 @@ def listenUdp():
           print("Murdered udp socket")
           break
       print('UDP RECVD: ' + f"{address[0]}" + ' ' + data.decode().split()[-1]) 
-      R_Server.rpush("connections", str(address[0]))
-      thread = threading.Thread(target = connectSocket, args = (address[0],))
-      thread.start()
+      if (f"{address[0]}" != selfIp) and not (str(address[0]) in R_Server.lrange("connections", 0, -1)):
+        R_Server.rpush("connections", str(address[0]))
+        thread = threading.Thread(target = connectSocket, args = (address[0],))
+        thread.start()
     #serversocket.close()
 
 
@@ -99,9 +100,10 @@ def listenTcp():
             except socket.error:
                 print("Murdered tcp socket")
                 break
-            R_Server.rpush("connections", str(address[0]))
-            recvThread = threading.Thread(target = Treceiver, args= (connection,address))
-            recvThread.start()
+            if (str(address[0]) != selfIp) and not (str(address[0]) in R_Server.lrange("connections", 0, -1)):
+                R_Server.rpush("connections", str(address[0]))
+                recvThread = threading.Thread(target = Treceiver, args= (connection,address))
+                recvThread.start()
     except KeyboardInterrupt:
         print("Stopped Listening tcp")
     
@@ -192,7 +194,7 @@ while(cont):
        cont = False
        endFlag.set()
       
-      #raise KeyboardInterrupt
+      
        for thread in threadStorage:
           thread.join()
        sys.exit()
